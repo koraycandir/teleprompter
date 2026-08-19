@@ -40,7 +40,8 @@
   .controls{display:flex; flex-direction:column; gap:14px; background:var(--panel);
     border:1px solid var(--line); border-radius:10px; padding:14px;}
   .row{display:flex; align-items:center; gap:12px;}
-  .row label{font-weight:600; text-transform:uppercase; letter-spacing:.08em;
+  /* :not(.switch) — the toggle is itself a <label>, and must not inherit this width. */
+  .row > label:not(.switch){font-weight:600; text-transform:uppercase; letter-spacing:.08em;
     font-size:13px; color:var(--dim); width:74px; flex:none;}
   .row output{width:56px; flex:none; text-align:right; font-variant-numeric:tabular-nums;
     color:var(--ink); font-size:14px;}
@@ -51,7 +52,12 @@
   .minibtn{border:1px solid var(--line); background:var(--bg); color:var(--ink);
     border-radius:9px; min-width:44px; height:40px; font-size:17px; cursor:pointer; flex:none;}
 
-  .switch{position:relative; width:46px; height:26px; flex:none; margin-left:auto;}
+  /* Must be a <label>: the .slider span paints over the invisible checkbox, so a real
+     finger tap lands on the span. Wrapping in a label makes any tap inside toggle it. */
+  .switch{position:relative; display:block; width:46px; height:26px; flex:none; margin-left:auto;
+    cursor:pointer;}
+  /* Widen the touch target to ~48px without changing the drawn size. */
+  .switch::after{content:""; position:absolute; inset:-11px -10px;}
   .switch input{position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer;}
   .slider{position:absolute; inset:0; background:var(--line); border-radius:13px; transition:background .15s;}
   .slider::before{content:""; position:absolute; top:3px; left:3px; width:20px; height:20px;
@@ -205,10 +211,10 @@ The small red line near the top marks your reading spot. Keep your eyes near the
   <div class="controls">
     <div class="row">
       <label for="recChk">Record</label>
-      <div class="switch">
+      <label class="switch">
         <input type="checkbox" id="recChk">
         <span class="slider"></span>
-      </div>
+      </label>
     </div>
     <div class="row hidden" id="camRow">
       <label for="camSel">Camera</label>
@@ -243,10 +249,10 @@ The small red line near the top marks your reading spot. Keep your eyes near the
     </div>
     <div class="row">
       <label for="mirrorChk">Mirror</label>
-      <div class="switch">
+      <label class="switch">
         <input type="checkbox" id="mirrorChk">
         <span class="slider"></span>
-      </div>
+      </label>
     </div>
     <div class="rowhint" style="margin:-6px 0 0 86px;">Mirror only if you film through teleprompter glass. Reading straight off the phone: leave it off.</div>
   </div>

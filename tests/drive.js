@@ -30,6 +30,20 @@
   }
   var lastMR = function () { return S.mr.length ? S.mr[S.mr.length - 1] : null; };
 
+  // Tap where a finger would land, through real hit-testing. Calling el.click()
+  // bypasses paint order and hides bugs where something covers the control.
+  function tapAt(el) {
+    var r = el.getBoundingClientRect();
+    var hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    if (hit) hit.click();
+    return hit;
+  }
+  function tapSwitch(id) {
+    var inp = $(id), before = inp.checked;
+    var hit = tapAt(inp.parentElement);
+    return { toggled: inp.checked !== before, hit: hit ? hit.tagName + '.' + (hit.className || '') : 'NOTHING' };
+  }
+
   async function run() {
     // ---------- boot ----------
     ok('boot: setup screen visible', vis($('setup')));
@@ -40,8 +54,16 @@
     ok('boot: Record toggle enabled on https', $('recChk').disabled === false);
     ok('boot: MediaRecorder present', !!window.MediaRecorder);
 
+    // ---------- switches must respond to a REAL tap, not just .click() ----------
+    var mt = tapSwitch('mirrorChk');
+    ok('switch: Mirror toggles when tapped like a finger', mt.toggled, 'tap landed on ' + mt.hit);
+    tapSwitch('mirrorChk');   // back off
+    ok('switch: Mirror returns to off', $('mirrorChk').checked === false);
+
     // ---------- camera ----------
-    $('recChk').click();
+    var rt = tapSwitch('recChk');
+    ok('switch: Record toggles when tapped like a finger', rt.toggled, 'tap landed on ' + rt.hit);
+    ok('switch: Record is not disabled on https', $('recChk').disabled === false);
     var camUp = await waitFor(function () { return vis($('camPrevWrap')) && $('camPrev').srcObject; }, 8000);
     ok('camera: preview appears after enabling Record', camUp);
     ok('camera: getUserMedia was called', S.gum.length > 0, JSON.stringify(S.gum[0] || {}));
