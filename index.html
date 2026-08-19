@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0B0C0E">
+<link rel="manifest" href="manifest.json">
+<title>Prompter</title>
+<style>
+  :root{
+    --bg:#0B0C0E; --panel:#141619; --line:#26292E;
+    --ink:#EDEDEA; --dim:#8A8F98; --tally:#E2483D;
+    --prompt-size:40px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    overscroll-behavior:none;}
+  .hidden{display:none !important;}
+
+  /* ---------- Setup screen ---------- */
+  #setup{min-height:100%; display:flex; flex-direction:column; gap:14px;
+    padding:20px 18px calc(24px + env(safe-area-inset-bottom));
+    max-width:560px; margin:0 auto;}
+  .brand{display:flex; align-items:center; gap:10px; padding-top:6px;}
+  .tallydot{width:10px; height:10px; border-radius:50%; background:var(--tally);
+    box-shadow:0 0 10px rgba(226,72,61,.7);}
+  .brand h1{font-weight:800; font-size:26px; letter-spacing:.06em; margin:0; text-transform:uppercase;}
+  .brand span{color:var(--dim); font-size:13px; margin-left:auto;}
+
+  #script{flex:1; min-height:200px; resize:vertical; width:100%;
+    background:var(--panel); color:var(--ink); border:1px solid var(--line);
+    border-radius:10px; padding:14px 14px; font-size:16px; line-height:1.5;
+    font-family:inherit;}
+  #script:focus{outline:2px solid var(--tally); outline-offset:1px; border-color:transparent;}
+
+  .stats{display:flex; gap:14px; color:var(--dim); font-size:13px;
+    font-variant-numeric:tabular-nums; padding:0 2px;}
+
+  .controls{display:flex; flex-direction:column; gap:14px; background:var(--panel);
+    border:1px solid var(--line); border-radius:10px; padding:14px;}
+  .row{display:flex; align-items:center; gap:12px;}
+  .row label{font-weight:600; text-transform:uppercase; letter-spacing:.08em;
+    font-size:13px; color:var(--dim); width:74px; flex:none;}
+  .row output{width:56px; flex:none; text-align:right; font-variant-numeric:tabular-nums;
+    color:var(--ink); font-size:14px;}
+  input[type=range]{flex:1; accent-color:var(--tally); height:28px;}
+  select{flex:1; min-width:0; background:var(--bg); color:var(--ink);
+    border:1px solid var(--line); border-radius:9px; height:40px; padding:0 10px;
+    font-family:inherit; font-size:14px;}
+  .minibtn{border:1px solid var(--line); background:var(--bg); color:var(--ink);
+    border-radius:9px; min-width:44px; height:40px; font-size:17px; cursor:pointer; flex:none;}
+
+  .switch{position:relative; width:46px; height:26px; flex:none; margin-left:auto;}
+  .switch input{position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer;}
+  .slider{position:absolute; inset:0; background:var(--line); border-radius:13px; transition:background .15s;}
+  .slider::before{content:""; position:absolute; top:3px; left:3px; width:20px; height:20px;
+    border-radius:50%; background:var(--dim); transition:transform .15s, background .15s;}
+  .switch input:checked + .slider{background:var(--tally);}
+  .switch input:checked + .slider::before{transform:translateX(20px); background:#fff;}
+  .rowhint{font-size:12px; color:var(--dim); line-height:1.45;}
+  .rowhint.warnhint{color:var(--tally);}
+
+  #camPrevWrap{border-radius:10px; overflow:hidden; background:#000; border:1px solid var(--line);}
+  #camPrev{display:block; width:100%; max-height:220px; object-fit:cover;}
+  #camPrev.mirror{transform:scaleX(-1);}
+
+  #startBtn{border:none; border-radius:12px; padding:16px; cursor:pointer;
+    background:var(--tally); color:#fff; font-family:inherit; font-weight:800;
+    font-size:20px; letter-spacing:.08em; text-transform:uppercase;
+    display:flex; align-items:center; justify-content:center; gap:10px;}
+  #startBtn::before{content:""; width:12px; height:12px; border-radius:50%;
+    background:#fff; box-shadow:0 0 8px rgba(255,255,255,.8);}
+  #startBtn:active{transform:scale(.99);}
+  .footnote{color:var(--dim); font-size:12.5px; line-height:1.5; text-align:center;}
+
+  /* ---------- Prompter stage ---------- */
+  #stage{position:fixed; inset:0; background:#000; overflow:hidden;
+    user-select:none; -webkit-user-select:none; touch-action:none;}
+  #flip{position:absolute; inset:0;}
+  #flip.mirrored{transform:scaleX(-1);}
+  #content{position:absolute; left:0; right:0; top:0; will-change:transform;
+    padding:44vh 6vw 62vh; font-size:var(--prompt-size); line-height:1.42;
+    font-weight:700; color:#fff; text-wrap:pretty;}
+  #content p{margin:0 0 .8em;}
+
+  .fade{position:absolute; left:0; right:0; pointer-events:none;}
+  #fadeTop{top:0; height:16vh; background:linear-gradient(rgba(0,0,0,.85),rgba(0,0,0,0));}
+  #fadeBottom{bottom:0; height:12vh; background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.7));}
+
+  #eyeline{position:absolute; left:0; right:0; top:38%; pointer-events:none;}
+  #eyeline .bar{height:2px; background:rgba(226,72,61,.6);}
+  #eyeline .tri{position:absolute; left:0; top:-7px; width:0; height:0;
+    border-top:7px solid transparent; border-bottom:7px solid transparent;
+    border-left:10px solid var(--tally); opacity:.85;}
+
+  #progress{position:absolute; top:0; left:0; right:0; height:3px;
+    background:rgba(255,255,255,.08); z-index:6; pointer-events:none;}
+  #progress .fill{height:100%; width:0; background:var(--tally);}
+
+  #pip{position:absolute; right:12px; bottom:calc(24px + env(safe-area-inset-bottom));
+    width:min(32vw,200px); border-radius:12px; border:1px solid var(--line);
+    background:#000; z-index:7; touch-action:none; cursor:grab;
+    transition:width .25s, opacity .25s;}
+  #pip.mirror{transform:scaleX(-1);}
+  #pip.rec{width:min(18vw,110px); opacity:.5;}
+
+  #recBadge{position:absolute; left:12px; bottom:calc(28px + env(safe-area-inset-bottom));
+    display:flex; align-items:center; gap:8px; z-index:8; cursor:pointer;
+    background:rgba(20,22,25,.85); border:1px solid var(--line); border-radius:999px;
+    padding:8px 14px; font-size:14px; font-variant-numeric:tabular-nums;}
+  #recBadge .rdot{width:10px; height:10px; border-radius:50%; background:var(--tally);
+    animation:pulse 1.2s ease-in-out infinite;}
+  @keyframes pulse{50%{opacity:.3;}}
+  /* Camera was expected but is not recording — must be impossible to miss mid-take. */
+  #recBadge.warn{background:rgba(226,72,61,.22); border-color:var(--tally); font-weight:700;
+    letter-spacing:.04em;}
+  #recBadge.warn .rdot{animation:none; background:var(--dim);}
+
+  #hud{position:absolute; left:0; right:0; top:3px; display:flex; flex-wrap:wrap;
+    align-items:center; gap:8px; z-index:9;
+    padding:calc(10px + env(safe-area-inset-top)) 12px 10px;
+    background:linear-gradient(rgba(0,0,0,.75),rgba(0,0,0,0));
+    transition:opacity .25s;}
+  #hud.faded{opacity:0; pointer-events:none;}
+  #hud button{border:1px solid var(--line); background:rgba(20,22,25,.85); color:var(--ink);
+    border-radius:9px; min-width:44px; height:40px; font-size:16px; cursor:pointer;
+    font-family:inherit;}
+  #hud button.stop{background:var(--tally); border-color:var(--tally); color:#fff;
+    font-weight:700; min-width:80px;}
+  #hud .grow{flex:1;}
+  #timeLeft{color:var(--ink); font-size:14px; font-variant-numeric:tabular-nums;}
+  #speedLabel{color:var(--dim); font-size:13px; font-variant-numeric:tabular-nums; min-width:52px; text-align:center;}
+
+  #countdown{position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:8px; z-index:10;
+    font-weight:800; font-size:120px; color:var(--tally);
+    background:rgba(0,0,0,.55); pointer-events:none;}
+  #countdown small{font-size:14px; font-weight:400; color:var(--dim); letter-spacing:.05em;}
+
+  #toast{position:fixed; left:50%; bottom:calc(28px + env(safe-area-inset-bottom));
+    transform:translateX(-50%); background:rgba(20,22,25,.92); border:1px solid var(--line);
+    color:var(--ink); padding:8px 14px; border-radius:999px; font-size:14px; z-index:60;
+    opacity:0; transition:opacity .2s; pointer-events:none; white-space:nowrap; max-width:92vw;
+    overflow:hidden; text-overflow:ellipsis;}
+  #toast.show{opacity:1;}
+
+  @media (prefers-reduced-motion: reduce){
+    .slider, .slider::before, #hud, #toast, #pip{transition:none;}
+    #recBadge .rdot{animation:none;}
+  }
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <div class="brand">
+    <div class="tallydot"></div>
+    <h1>Prompter</h1>
+    <span>tap Roll when ready</span>
+  </div>
+
+  <textarea id="script" spellcheck="false">Welcome to your teleprompter.
+
+Replace this with your own script. Write it exactly the way you want to say it out loud, then press Roll below.
+
+The text scrolls up on its own. Tap the screen to pause, tap again to continue. Drag the text with your finger to jump backward or forward. While recording, tapping pauses only the scroll &#8212; the camera keeps rolling, so you can ad-lib.
+
+The small red line near the top marks your reading spot. Keep your eyes near the camera, not on yourself.</textarea>
+
+  <div class="stats">
+    <span id="statWords">0 words</span>
+    <span id="statTime">&#8212;</span>
+  </div>
+
+  <div class="controls">
+    <div class="row">
+      <label for="recChk">Record</label>
+      <div class="switch">
+        <input type="checkbox" id="recChk">
+        <span class="slider"></span>
+      </div>
+    </div>
+    <div class="row hidden" id="camRow">
+      <label for="camSel">Camera</label>
+      <select id="camSel"></select>
+      <button id="flipCamBtn" class="minibtn" aria-label="Switch front/rear">&#8646;</button>
+    </div>
+    <div id="camPrevWrap" class="hidden">
+      <video id="camPrev" autoplay playsinline muted></video>
+    </div>
+    <div class="rowhint" id="camHint">Turn on to film yourself while you read. The take saves to your Downloads when you stop.</div>
+  </div>
+
+  <div class="controls">
+    <div class="row">
+      <label for="sizeRange">Text size</label>
+      <input type="range" id="sizeRange" min="24" max="96" step="2" value="40">
+      <output id="sizeOut">40</output>
+    </div>
+    <div class="row">
+      <label for="speedRange">Speed</label>
+      <input type="range" id="speedRange" min="20" max="200" step="5" value="60">
+      <output id="speedOut">60</output>
+    </div>
+    <div class="row">
+      <label for="mirrorChk">Mirror</label>
+      <div class="switch">
+        <input type="checkbox" id="mirrorChk">
+        <span class="slider"></span>
+      </div>
+    </div>
+    <div class="rowhint" style="margin:-6px 0 0 86px;">Mirror only if you film through teleprompter glass. Reading straight off the phone: leave it off.</div>
+  </div>
+
+  <button id="startBtn">Roll prompter</button>
+  <div class="footnote">Your script and settings are saved on this device automatically. The screen stays awake
+    while rolling. A Bluetooth page-turner pedal works too: its page keys pause and jump.</div>
+</div>
+
+<div id="stage" class="hidden">
+  <div id="flip">
+    <div id="content"></div>
+  </div>
+  <div class="fade" id="fadeTop"></div>
+  <div class="fade" id="fadeBottom"></div>
+  <div id="eyeline"><div class="tri"></div><div class="bar"></div></div>
+  <div id="progress"><div class="fill" id="progressFill"></div></div>
+  <video id="pip" class="hidden" autoplay playsinline muted></video>
+  <div id="recBadge" class="hidden"><span class="rdot"></span><span id="recTime">0:00</span></div>
+  <div id="hud">
+    <button id="exitBtn" aria-label="Close">&#10005;</button>
+    <button id="restartBtn" aria-label="Back to top">&#8634;</button>
+    <button id="stopBtn" class="stop hidden" aria-label="Stop and save">&#9632; Stop</button>
+    <div class="grow"></div>
+    <span id="timeLeft">0:00</span>
+    <div class="grow"></div>
+    <button id="sizeDownBtn" aria-label="Smaller text">A&#8722;</button>
+    <button id="sizeUpBtn" aria-label="Larger text">A+</button>
+    <button id="slowBtn" aria-label="Slower">&#8722;</button>
+    <span id="speedLabel">60 px/s</span>
+    <button id="fastBtn" aria-label="Faster">+</button>
+  </div>
+  <div id="countdown" class="hidden"><div id="cdNum">3</div><small>tap to skip</small></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var setup = $('setup'), stage = $('stage'), flip = $('flip'), content = $('content');
+  var hud = $('hud'), cd = $('countdown'), cdNum = $('cdNum'), toastEl = $('toast');
+  var scriptBox = $('script');
+  var sizeRange = $('sizeRange'), sizeOut = $('sizeOut');
+  var speedRange = $('speedRange'), speedOut = $('speedOut');
+  var speedLabel = $('speedLabel'), timeLeft = $('timeLeft');
+  var progressFill = $('progressFill');
+  var statWords = $('statWords'), statTime = $('statTime');
+  var recChk = $('recChk'), camRow = $('camRow'), camSel = $('camSel');
+  var camPrevWrap = $('camPrevWrap'), camPrev = $('camPrev'), camHint = $('camHint');
+  var pip = $('pip'), recBadge = $('recBadge'), recTime = $('recTime');
+  var startBtn = $('startBtn'), stopBtn = $('stopBtn');
+
+  var speed = 60;          // pixels per second
+  var size = 40;           // prompt font size in px
+  var pos = 0;             // current scroll position
+  var maxPos = 0;
+  var running = false;
+  var counting = false;
+  var stageOpen = false;
+  var lastT = null;
+  var rafId = null;
+  var wakeLock = null;
+  var toastTimer = null;
+  var cdTimer = null;
+
+  // Cameras are only available in a secure context. A page opened from storage
+  // (file:// or content:// on Android) can never record, whatever the OS permissions say.
+  // isSecureContext alone is not enough: Chrome reports file:// as secure but still
+  // blocks the camera there. The real rule is https:// or localhost.
+  var LOCALHOST = (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]');
+  var SECURE = (window.isSecureContext !== false) && (location.protocol === 'https:' || LOCALHOST);
+  var CAM_OK = SECURE && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  var INSECURE_MSG = 'This page was opened from storage, so the camera is blocked. ' +
+                     'Open it from an https:// address to record.';
+  var stream = null;
+  var camGen = 0;          // invalidates superseded/aborted camera acquisitions
+  var camPending = null;   // in-flight startCam(), so Roll can wait for it
+  var recorder = null;
+  var chunks = [];
+  var recMime = '';
+  var recTimer = null;
+  var recStart = 0;
+
+  // ----- storage (best effort; private mode etc. may block it) -----
+  function store(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
+  function recall(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+  function clampNum(v, lo, hi, fallback){
+    v = parseInt(v, 10);
+    return isNaN(v) ? fallback : Math.min(hi, Math.max(lo, v));
+  }
+
+  function applySize(v){
+    size = Math.round(v / 2) * 2;   // keep it on the slider's step
+    document.documentElement.style.setProperty('--prompt-size', size + 'px');
+    sizeRange.value = Math.min(96, Math.max(24, size));
+    sizeOut.textContent = size;
+  }
+
+  // ----- setup controls -----
+  sizeRange.addEventListener('input', function(){
+    applySize(parseInt(sizeRange.value, 10));
+    store('tp.size', size);
+    estimateSoon();
+  });
+  speedRange.addEventListener('input', function(){
+    speed = parseInt(speedRange.value, 10);
+    speedOut.textContent = speed;
+    store('tp.speed', speed);
+    estimateSoon();
+  });
+  $('mirrorChk').addEventListener('change', function(){
+    store('tp.mirror', $('mirrorChk').checked ? '1' : '0');
+  });
+  var saveTimer = null;
+  scriptBox.addEventListener('input', function(){
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function(){ store('tp.script', scriptBox.value); }, 300);
+    estimateSoon();
+  });
+
+  function escapeHtml(s){
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function buildContent(){
+    var raw = scriptBox.value.trim();
+    if(!raw){ raw = 'Your script is empty. Close this, paste your script in the box, and press Roll again.'; }
+    var html = escapeHtml(raw).split(/\n\s*\n/).map(function(p){
+      return '<p>' + p.replace(/\n/g,'<br>') + '</p>';
+    }).join('');
+    content.innerHTML = html;
+  }
+
+  function fmt(secs){
+    secs = Math.max(0, Math.round(secs));
+    var m = Math.floor(secs / 60), s = secs % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  // ----- word count + duration estimate on the setup screen -----
+  function estimate(){
+    if(stageOpen) return;
+    var raw = scriptBox.value.trim();
+    var words = raw ? raw.split(/\s+/).length : 0;
+    statWords.textContent = words + (words === 1 ? ' word' : ' words');
+    if(!words){ statTime.textContent = '—'; return; }   // don't time the placeholder text
+    stage.style.visibility = 'hidden';
+    stage.classList.remove('hidden');
+    buildContent();
+    var travel = Math.max(0, content.scrollHeight - window.innerHeight);
+    stage.classList.add('hidden');
+    stage.style.visibility = '';
+    statTime.textContent = travel > 0 ? '≈ ' + fmt(travel / speed) + ' at speed ' + speed : '—';
+  }
+  var estTimer = null;
+  function estimateSoon(){
+    clearTimeout(estTimer);
+    estTimer = setTimeout(estimate, 200);
+  }
+
+  function recalc(){
+    maxPos = Math.max(0, content.scrollHeight - window.innerHeight);
+  }
+  function recalcKeepPlace(){
+    var f = maxPos > 0 ? pos / maxPos : 0;
+    recalc();
+    pos = f * maxPos;
+    applyPos();
+  }
+  function clampPip(){
+    // The pip switches to absolute left/top once dragged; folding or rotating
+    // would otherwise strand it off-screen with no way to get it back.
+    if(!pip.style.left) return;
+    var x = Math.max(4, Math.min(window.innerWidth - pip.offsetWidth - 4, parseFloat(pip.style.left) || 0));
+    var y = Math.max(4, Math.min(window.innerHeight - pip.offsetHeight - 4, parseFloat(pip.style.top) || 0));
+    pip.style.left = x + 'px';
+    pip.style.top = y + 'px';
+  }
+  window.addEventListener('resize', function(){
+    if(stageOpen){ recalcKeepPlace(); clampPip(); }
+    else estimateSoon();   // folding, unfolding or rotating changes the estimate
+  });
+
+  function applyPos(){
+    content.style.transform = 'translateY(' + (-pos) + 'px)';
+    progressFill.style.width = maxPos > 0 ? (pos / maxPos * 100) + '%' : '0%';
+    timeLeft.textContent = fmt(speed > 0 ? (maxPos - pos) / speed : 0) + ' left';
+  }
+
+  // ----- wake lock -----
+  function lock(){
+    if(!('wakeLock' in navigator)) return;
+    navigator.wakeLock.request('screen').then(function(wl){ wakeLock = wl; }).catch(function(){});
+  }
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'visible' && stageOpen){
+      lastT = null;   // first frame back must advance by zero, not by the time away
+      lock();
+    }
+    if(document.visibilityState === 'hidden') store('tp.script', scriptBox.value);
+  });
+
+  // ----- camera -----
+  function camErrMsg(err){
+    var n = err && err.name;
+    // Chrome reports an insecure-origin block as NotAllowedError, which sends people
+    // hunting through Android settings for a permission that was never the problem.
+    if(!SECURE) return 'Camera blocked: this page is not on https://';
+    if(n === 'NotAllowedError') return 'Camera permission denied — allow it in site settings';
+    if(n === 'NotFoundError' || n === 'OverconstrainedError') return 'No usable camera found';
+    if(n === 'NotReadableError') return 'Camera is busy in another app';
+    return 'Camera error' + (n ? ': ' + n : '');
+  }
+  function currentTrack(){
+    return stream ? stream.getVideoTracks()[0] : null;
+  }
+  function currentFacing(){
+    var t = currentTrack();
+    if(!t) return null;
+    var s = t.getSettings ? t.getSettings() : {};
+    if(s.facingMode) return s.facingMode;
+    var l = (t.label || '').toLowerCase();
+    if(l.indexOf('front') >= 0) return 'user';
+    if(l.indexOf('back') >= 0 || l.indexOf('rear') >= 0) return 'environment';
+    return null;
+  }
+  function updateMirror(){
+    // Mirror the on-screen previews for selfie cameras only; the recording is never mirrored.
+    var m = currentFacing() !== 'environment';
+    camPrev.classList.toggle('mirror', m);
+    pip.classList.toggle('mirror', m);
+  }
+  var DEFAULT_HINT = camHint.textContent;
+  function setHint(msg){
+    // A 1.6s toast is not enough for a camera failure — keep it on screen.
+    camHint.textContent = msg || DEFAULT_HINT;
+    camHint.classList.toggle('warnhint', !!msg);
+  }
+  function camUi(){
+    var on = !!stream;
+    camRow.classList.toggle('hidden', !on);
+    camPrevWrap.classList.toggle('hidden', !on);
+    startBtn.textContent = (recChk.checked && on) ? 'Roll + record' : 'Roll prompter';
+  }
+  function refreshDevices(){
+    if(!CAM_OK || !navigator.mediaDevices.enumerateDevices) return Promise.resolve();
+    return navigator.mediaDevices.enumerateDevices().then(function(devs){
+      var cams = devs.filter(function(d){ return d.kind === 'videoinput'; });
+      camSel.innerHTML = '';
+      cams.forEach(function(d, i){
+        var o = document.createElement('option');
+        o.value = d.deviceId;
+        o.textContent = d.label || ('Camera ' + (i + 1));
+        camSel.appendChild(o);
+      });
+      var t = currentTrack();
+      var id = t && t.getSettings ? t.getSettings().deviceId : null;
+      if(id) camSel.value = id;
+    }).catch(function(){});
+  }
+  function stopCam(){
+    camGen++;   // anything already in flight is now stale
+    if(stream){ stream.getTracks().forEach(function(t){ t.stop(); }); }
+    stream = null;
+    camPrev.srcObject = null;
+    pip.srcObject = null;
+    camUi();
+  }
+  function adoptStream(s, rememberId){
+    stream = s;
+    camPrev.srcObject = s;
+    pip.srcObject = s;
+    var t = currentTrack();
+    if(rememberId && t && t.getSettings){
+      var id = t.getSettings().deviceId;
+      if(id) store('tp.camId', id);
+    }
+    // A track can end without us asking (camera seized by another app, hinge change).
+    // Turn that into a saved take rather than a frozen picture and a lying badge.
+    s.getTracks().forEach(function(tr){
+      tr.onended = function(){
+        if(recordingNow()){ stopRecording(); warnNotRecording('Camera stopped — take saved'); }
+        else if(stageOpen && recChk.checked){ warnNotRecording('Camera stopped'); }
+      };
+    });
+    updateMirror();
+  }
+  function startCam(pref){
+    var myGen = ++camGen;
+    var prev = stream;          // keep the working stream until a new one is actually live
+    var fellBack = false;
+    function want(withDevice){
+      var video = { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30} };
+      if(withDevice && pref && pref.deviceId) video.deviceId = {exact: pref.deviceId};
+      else if(pref && pref.facing) video.facingMode = {ideal: pref.facing};
+      return { video: video, audio: { echoCancellation:true, noiseSuppression:true } };
+    }
+    function releasePrev(){
+      if(prev){ prev.getTracks().forEach(function(t){ t.stop(); }); prev = null; }
+    }
+    var p = navigator.mediaDevices.getUserMedia(want(true))
+      .catch(function(err){
+        // Many phones refuse to open a second camera while one is still live.
+        // Only then do we give up the working stream, and retry.
+        if(prev && (err.name === 'NotReadableError' || err.name === 'AbortError')){
+          releasePrev();
+          return navigator.mediaDevices.getUserMedia(want(true));
+        }
+        throw err;
+      })
+      .catch(function(err){
+        // A remembered device can vanish (the fold state changed) — take any camera,
+        // but do not overwrite the remembered preference with the fallback.
+        if(pref && pref.deviceId){
+          fellBack = true;
+          releasePrev();
+          return navigator.mediaDevices.getUserMedia(want(false));
+        }
+        throw err;
+      })
+      .then(function(s){
+        if(myGen !== camGen){                 // superseded or cancelled while we waited
+          s.getTracks().forEach(function(t){ t.stop(); });
+          return;
+        }
+        releasePrev();
+        adoptStream(s, !fellBack);
+        // Populate the picker before revealing it, or the row flashes empty.
+        // (Labels only become available after the first permission grant.)
+        return refreshDevices();
+      })
+      .then(function(){ if(myGen === camGen) camUi(); });
+
+    camPending = p;
+    p.catch(function(){}).then(function(){ if(camPending === p) camPending = null; });
+    return p;
+  }
+  function camFailed(err){
+    recChk.checked = false;
+    store('tp.rec','0');
+    camUi();
+    setHint(camErrMsg(err) + '. Turn Record on again to retry.');
+    toast(camErrMsg(err));
+  }
+  recChk.addEventListener('change', function(){
+    store('tp.rec', recChk.checked ? '1' : '0');
+    setHint(null);
+    if(recChk.checked){
+      if(!CAM_OK){
+        recChk.checked = false;
+        store('tp.rec','0');
+        setHint(INSECURE_MSG);
+        toast('Camera needs an https:// address');
+        return;
+      }
+      var saved = recall('tp.camId');
+      startCam(saved ? {deviceId: saved} : {facing:'user'}).catch(camFailed);
+    } else {
+      stopCam();
+    }
+  });
+  camSel.addEventListener('change', function(){
+    setHint(null);
+    startCam({deviceId: camSel.value}).catch(function(err){
+      // The old stream survives a failed switch, so just explain and stay put.
+      setHint(camErrMsg(err) + '. Still using the previous camera.');
+      toast(camErrMsg(err));
+      refreshDevices();
+    });
+  });
+  $('flipCamBtn').addEventListener('click', function(){
+    setHint(null);
+    var facing = currentFacing();
+    var pref;
+    if(facing === 'user' || facing === 'environment'){
+      pref = { facing: facing === 'user' ? 'environment' : 'user' };
+    } else {
+      // Driver reports no facingMode — cycle through the device list instead of no-opping.
+      var n = camSel.options.length;
+      if(n < 2){ toast('Only one camera available'); return; }
+      pref = { deviceId: camSel.options[(camSel.selectedIndex + 1) % n].value };
+    }
+    startCam(pref).catch(function(err){
+      setHint(camErrMsg(err) + '. Still using the previous camera.');
+      toast(camErrMsg(err));
+    });
+  });
+
+  // ----- recording -----
+  function pickMime(){
+    if(!window.MediaRecorder) return null;
+    var cands = [
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+      'video/mp4;codecs=avc1,mp4a.40.2',
+      'video/mp4',
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm'
+    ];
+    for(var i = 0; i < cands.length; i++){
+      if(MediaRecorder.isTypeSupported(cands[i])) return cands[i];
+    }
+    return '';
+  }
+  function takeName(){
+    var d = new Date();
+    function p(n){ return (n < 10 ? '0' : '') + n; }
+    // Seconds matter: two takes in the same minute would otherwise collide and the
+    // browser would save the second as "take-... (1)".
+    return 'take-' + d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()) +
+           '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+  }
+  function startRecording(){
+    if(!stream || !stream.active || !window.MediaRecorder) return false;
+    recMime = pickMime();
+    chunks = [];
+    var opts = { videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 };
+    if(recMime) opts.mimeType = recMime;
+    try{ recorder = new MediaRecorder(stream, opts); }
+    catch(e){
+      try{ recorder = new MediaRecorder(stream); }
+      catch(e2){ toast('Recording not supported here'); return false; }
+    }
+    recorder.ondataavailable = function(e){ if(e.data && e.data.size) chunks.push(e.data); };
+    // A recorder can stop on its own (camera seized, hardware error). Tear the UI
+    // down from onstop, never only from the Stop button, or the badge keeps counting
+    // on a take that is no longer being recorded.
+    recorder.onstop = function(){ resetRecUi(); saveTake(); };
+    recorder.onerror = function(){
+      toast('Recorder error — saving what we have');
+      try{ if(recorder && recorder.state !== 'inactive') recorder.stop(); else { resetRecUi(); saveTake(); } }
+      catch(e){ resetRecUi(); saveTake(); }
+    };
+    recorder.start(1000);
+    recStart = Date.now();
+    recTime.textContent = '0:00';
+    recBadge.classList.remove('warn');
+    recBadge.classList.remove('hidden');
+    stopBtn.classList.remove('hidden');
+    pip.classList.add('rec');
+    recTimer = setInterval(function(){
+      recTime.textContent = fmt((Date.now() - recStart) / 1000);
+    }, 500);
+    return true;
+  }
+  function recordingNow(){
+    return recorder && recorder.state !== 'inactive';
+  }
+  function resetRecUi(){
+    clearInterval(recTimer);
+    recTimer = null;
+    recBadge.classList.add('hidden');
+    recBadge.classList.remove('warn');
+    stopBtn.classList.add('hidden');
+    pip.classList.remove('rec');
+  }
+  function warnNotRecording(msg){
+    resetRecUi();
+    recBadge.classList.add('warn');
+    recBadge.classList.remove('hidden');
+    recTime.textContent = 'NOT RECORDING';
+    toast(msg);
+  }
+  function stopRecording(){
+    if(!recordingNow()){ resetRecUi(); return; }
+    resetRecUi();
+    recorder.stop();
+  }
+  function saveTake(){
+    var type = (recorder && recorder.mimeType) || recMime || 'video/webm';
+    var ext = type.indexOf('mp4') >= 0 ? 'mp4' : 'webm';
+    var blob = new Blob(chunks, {type: type});
+    chunks = [];
+    recorder = null;
+    if(!blob.size){ toast('Take was empty — nothing saved'); return; }
+    var name = takeName() + '.' + ext;
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 10000);
+    toast('Saved ' + name);
+  }
+
+  // ----- main loop -----
+  function tick(t){
+    if(running){
+      if(lastT === null) lastT = t;
+      // Clamp the timestep: rAF stops firing while backgrounded, so an unclamped
+      // delta would fast-forward the script by the whole time away and ruin the take.
+      var dt = Math.min((t - lastT) / 1000, 0.1);
+      lastT = t;
+      pos += speed * dt;
+      if(pos >= maxPos){
+        pos = maxPos;
+        running = false;
+        showHud();
+        toast(recordingNow() ? 'End of script — still recording' : 'End of script');
+      }
+      applyPos();
+    } else {
+      lastT = null;
+    }
+    rafId = requestAnimationFrame(tick);
+  }
+
+  // ----- hud / toast -----
+  function showHud(){ hud.classList.remove('faded'); }
+  function hideHud(){ hud.classList.add('faded'); }
+  function toast(msg){
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 1600);
+  }
+  function setSpeed(v){
+    // Snap to the slider's own step/range so the setup slider can always represent
+    // the live speed exactly — otherwise the handle and the number drift apart.
+    speed = Math.min(200, Math.max(20, Math.round(v / 5) * 5));
+    speedLabel.textContent = speed + ' px/s';
+    speedRange.value = speed;
+    speedOut.textContent = speed;
+    store('tp.speed', speed);
+    applyPos();
+    toast('Speed ' + speed);
+  }
+  function nudgeSize(d){
+    applySize(Math.min(96, Math.max(24, size + d)));
+    store('tp.size', size);
+    recalcKeepPlace();
+    toast('Size ' + size);
+  }
+
+  // ----- start / stop -----
+  function startAction(){
+    cd.classList.add('hidden');
+    counting = false;
+    running = true;
+    hideHud();
+    // Note the missing else in the old version: if Record was armed but the stream
+    // was gone, the whole take rolled with no recording and no warning at all.
+    if(recChk.checked){
+      if(!stream || !stream.active || !startRecording()){
+        warnNotRecording('NOT RECORDING — camera unavailable');
+      }
+    }
+  }
+  function beginCountdown(){
+    counting = true;
+    var n = 3;
+    cdNum.textContent = n;
+    cd.classList.remove('hidden');
+    cdTimer = setInterval(function(){
+      n--;
+      if(n <= 0){
+        clearInterval(cdTimer);
+        startAction();
+      } else {
+        cdNum.textContent = n;
+      }
+    }, 1000);
+  }
+  function skipCountdown(){
+    clearInterval(cdTimer);
+    startAction();
+  }
+
+  var pushedState = false;
+  function enterStage(){
+    store('tp.script', scriptBox.value);
+    buildContent();
+    flip.classList.toggle('mirrored', $('mirrorChk').checked);
+    setup.classList.add('hidden');
+    stage.classList.remove('hidden');
+    stageOpen = true;
+    pos = 0; recalc(); applyPos();
+    speedLabel.textContent = speed + ' px/s';
+    pip.classList.toggle('hidden', !(recChk.checked && stream));
+    if(document.documentElement.requestFullscreen){
+      document.documentElement.requestFullscreen().catch(function(){});
+    }
+    // Own one history entry so Android's back gesture stops the take and saves it
+    // instead of tearing down the document with the footage still in memory.
+    if(!pushedState){
+      try{ history.pushState({tpStage:1}, ''); pushedState = true; }catch(e){}
+    }
+    lock();
+    showHud();
+    beginCountdown();
+    if(rafId === null) rafId = requestAnimationFrame(tick);
+  }
+  startBtn.addEventListener('click', function(){
+    // Never roll a "recording" take while the camera is still being acquired —
+    // that was a silent no-recording race on every cold launch.
+    if(recChk.checked && camPending){
+      startBtn.disabled = true;
+      startBtn.textContent = 'Starting camera…';
+      camPending.catch(function(){}).then(function(){
+        startBtn.disabled = false;
+        camUi();
+        enterStage();
+      });
+      return;
+    }
+    enterStage();
+  });
+
+  function exitStage(){
+    stopRecording();   // never lose a take: leaving the stage saves it
+    running = false;
+    counting = false;
+    clearInterval(cdTimer);
+    cd.classList.add('hidden');
+    stageOpen = false;
+    dragging = false; dragMoved = false; dragId = null;   // don't leak gesture state into the next take
+    stage.classList.add('hidden');
+    setup.classList.remove('hidden');
+    resetRecUi();
+    if(document.fullscreenElement){ document.exitFullscreen().catch(function(){}); }
+    if(wakeLock){ wakeLock.release().catch(function(){}); wakeLock = null; }
+    if(rafId !== null){ cancelAnimationFrame(rafId); rafId = null; }
+    if(pushedState){ pushedState = false; try{ history.back(); }catch(e){} }
+    estimateSoon();
+  }
+  window.addEventListener('popstate', function(){
+    if(stageOpen){ pushedState = false; exitStage(); }
+  });
+  window.addEventListener('beforeunload', function(e){
+    // The take lives only in memory until saveTake runs — make a reload/close ask first.
+    if(recordingNow()){ e.preventDefault(); e.returnValue = ''; return ''; }
+  });
+  function stopAndSave(){
+    exitStage();   // works even if the recorder already stopped on its own
+  }
+
+  // ----- drag to scrub -----
+  var dragging = false, dragMoved = false, wasRunning = false, downY = 0, lastY = 0;
+  var dragId = null;
+  // Below the platform tap slop a thumb wobble is still a tap, not a scrub —
+  // at 8px a normal tap was being classified as a drag, so pause/resume did nothing.
+  var TAP_SLOP = 14;
+  stage.addEventListener('pointerdown', function(e){
+    if(!stageOpen || counting) return;
+    if(e.target.closest('#hud') || e.target === pip || e.target.closest('#recBadge')) return;
+    if(dragId !== null) return;                 // a second finger must not hijack the gesture
+    dragId = e.pointerId;
+    dragging = true; dragMoved = false;
+    downY = e.clientY; lastY = e.clientY;
+    wasRunning = running;
+  });
+  stage.addEventListener('pointermove', function(e){
+    if(!dragging || e.pointerId !== dragId) return;
+    var dy = e.clientY - lastY;
+    lastY = e.clientY;
+    if(!dragMoved && Math.abs(e.clientY - downY) > TAP_SLOP){
+      dragMoved = true;
+      running = false;
+    }
+    if(dragMoved){
+      pos = Math.min(maxPos, Math.max(0, pos - dy));
+      applyPos();
+    }
+  });
+  function endDrag(e){
+    if(!dragging || (e && e.pointerId !== dragId)) return;
+    dragging = false;
+    dragId = null;
+    if(dragMoved){
+      if(wasRunning && pos < maxPos){ running = true; hideHud(); }
+      else { showHud(); }
+    }
+  }
+  stage.addEventListener('pointerup', endDrag);
+  stage.addEventListener('pointercancel', function(e){
+    endDrag(e);
+    dragMoved = false;
+  });
+
+  // ----- draggable self-preview -----
+  var pipDrag = null;
+  pip.addEventListener('pointerdown', function(e){
+    e.stopPropagation();
+    pip.setPointerCapture(e.pointerId);
+    pipDrag = { dx: e.clientX - pip.offsetLeft, dy: e.clientY - pip.offsetTop };
+  });
+  pip.addEventListener('pointermove', function(e){
+    if(!pipDrag) return;
+    var x = Math.max(4, Math.min(window.innerWidth - pip.offsetWidth - 4, e.clientX - pipDrag.dx));
+    var y = Math.max(4, Math.min(window.innerHeight - pip.offsetHeight - 4, e.clientY - pipDrag.dy));
+    pip.style.left = x + 'px'; pip.style.top = y + 'px';
+    pip.style.right = 'auto'; pip.style.bottom = 'auto';
+  });
+  pip.addEventListener('pointerup', function(){ pipDrag = null; });
+  pip.addEventListener('pointercancel', function(){ pipDrag = null; });
+  pip.addEventListener('click', function(e){ e.stopPropagation(); });
+
+  // ----- tap on stage -----
+  stage.addEventListener('click', function(e){
+    // Missing the A+/− cluster by a few px used to land on HUD chrome and silently
+    // resume the scroll. Only the script area toggles playback.
+    if(e.target.closest('#hud') || e.target.closest('#recBadge') || e.target === pip) return;
+    if(dragMoved){ dragMoved = false; return; }
+    if(counting){ skipCountdown(); return; }
+    if(running){
+      running = false;
+      showHud();
+      toast(recordingNow() ? 'Scroll paused — still recording' : 'Paused — tap to continue');
+    } else {
+      if(pos >= maxPos && maxPos > 0){
+        showHud();
+        toast('At the end — ↺ goes back to top');
+        return;
+      }
+      hideHud();
+      running = true;
+    }
+  });
+  function btn(id, fn){
+    $(id).addEventListener('click', function(e){ e.stopPropagation(); fn(); });
+  }
+  btn('exitBtn', exitStage);
+  btn('stopBtn', stopAndSave);
+  btn('restartBtn', function(){ pos = 0; applyPos(); toast('Back to top'); });
+  btn('slowBtn', function(){ setSpeed(speed / 1.15); });
+  btn('fastBtn', function(){ setSpeed(speed * 1.15); });
+  btn('sizeDownBtn', function(){ nudgeSize(-4); });
+  btn('sizeUpBtn', function(){ nudgeSize(4); });
+  recBadge.addEventListener('click', function(e){ e.stopPropagation(); stopAndSave(); });
+
+  function jump(px){
+    pos = Math.min(maxPos, Math.max(0, pos + px));
+    applyPos();
+  }
+  document.addEventListener('keydown', function(e){
+    if(!stageOpen) return;
+    if(counting){
+      if(e.key === 'Escape'){ exitStage(); }
+      else if(e.key === ' ' || e.key === 'Enter'){ e.preventDefault(); skipCountdown(); }
+      return;
+    }
+    switch(e.key){
+      case ' ':
+      case 'Enter':
+        e.preventDefault();
+        running = !running;
+        if(running){ hideHud(); } else { showHud(); }
+        break;
+      case 'ArrowUp':    e.preventDefault(); setSpeed(speed * 1.15); break;
+      case 'ArrowDown':  e.preventDefault(); setSpeed(speed / 1.15); break;
+      case 'PageDown':
+      case 'ArrowRight': e.preventDefault(); jump(200); break;
+      case 'PageUp':
+      case 'ArrowLeft':  e.preventDefault(); jump(-200); break;
+      case 'Home':       e.preventDefault(); pos = 0; applyPos(); break;
+      case 'Escape':     exitStage(); break;
+    }
+  });
+
+  // ----- restore saved state -----
+  var savedScript = recall('tp.script');
+  // An empty box is a deliberate state: restore it too, or the sample script
+  // reappears on the next launch as if your clearing it never happened.
+  if(savedScript !== null){ scriptBox.value = savedScript; }
+  applySize(clampNum(recall('tp.size'), 24, 96, 40));
+  speed = Math.round(clampNum(recall('tp.speed'), 20, 200, 60) / 5) * 5;
+  speedRange.value = speed;
+  speedOut.textContent = speed;
+  $('mirrorChk').checked = recall('tp.mirror') === '1';
+  if(CAM_OK && recall('tp.rec') === '1'){
+    recChk.checked = true;
+    var savedCam = recall('tp.camId');
+    // Same feedback as the manual toggle — a switch that silently flips itself
+    // back off with no explanation is how you end up with an unrecorded take.
+    startCam(savedCam ? {deviceId: savedCam} : {facing:'user'}).catch(camFailed);
+  }
+  camUi();
+  // Say it up front rather than letting them fight Android permissions first.
+  if(!SECURE){
+    recChk.disabled = true;
+    setHint(INSECURE_MSG);
+  }
+  estimate();
+
+  if('serviceWorker' in navigator && SECURE){
+    navigator.serviceWorker.register('sw.js').catch(function(){});
+  }
+})();
+</script>
+</body>
+</html>

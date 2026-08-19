@@ -1,0 +1,10 @@
+# Local HTTPS test server's self-signed certificate — never publish the private key
+.key.pem
+.cert.pem
+
+# Test artifacts (browser profiles, recorded takes, build copies)
+tests/.artifacts/
+
+# Superseded drafts kept only as local backups
+teleprompter.html
+teleprompter-old.html
