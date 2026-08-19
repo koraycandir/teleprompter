@@ -60,6 +60,16 @@
   .switch input:checked + .slider::before{transform:translateX(20px); background:#fff;}
   .rowhint{font-size:12px; color:var(--dim); line-height:1.45;}
   .rowhint.warnhint{color:var(--tally);}
+  /* Shown only when the page was opened from storage instead of the web. */
+  #badurl{background:rgba(226,72,61,.12); border:1px solid var(--tally); border-radius:10px;
+    padding:14px; display:flex; flex-direction:column; gap:8px;}
+  #badurl strong{font-size:15px; color:var(--tally);}
+  #badurl .small{font-size:12px; color:var(--dim); line-height:1.45; word-break:break-all;}
+  #badurl a{display:block; background:var(--tally); color:#fff; text-decoration:none;
+    text-align:center; padding:14px 10px; border-radius:9px; font-weight:700; font-size:15px;
+    word-break:break-all;}
+  #badurlCopy{height:40px; border:1px solid var(--line); background:var(--panel); color:var(--ink);
+    border-radius:8px; font-family:inherit; font-size:13px; cursor:pointer;}
   .linkbtn{background:none; border:none; color:var(--dim); font-family:inherit; font-size:12px;
     text-decoration:underline; padding:6px 0 0; cursor:pointer; text-align:left;}
   #diag{background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px; margin-top:8px;}
@@ -166,6 +176,17 @@
     <div class="tallydot"></div>
     <h1>Prompter</h1>
     <span>tap Roll when ready</span>
+  </div>
+
+  <div id="badurl" class="hidden">
+    <strong>⚠ This copy cannot use the camera</strong>
+    <div class="small">You opened a file saved on the phone. Browsers only allow the camera on a
+      real web address, so recording is impossible here no matter what permissions you grant.</div>
+    <div class="small">Open this instead (then use ⋮ &rarr; Add to Home screen, and delete the old
+      file from Downloads so you don't tap it again):</div>
+    <a id="badurlLink" href="https://koraycandir.github.io/teleprompter/">https://koraycandir.github.io/teleprompter/</a>
+    <button id="badurlCopy" type="button">Copy the link</button>
+    <div class="small" id="badurlWhere"></div>
   </div>
 
   <textarea id="script" spellcheck="false">Welcome to your teleprompter.
@@ -1086,10 +1107,19 @@ The small red line near the top marks your reading spot. Keep your eyes near the
     startCam(savedCam ? {deviceId: savedCam} : {facing:'user'}).catch(camFailed);
   }
   camUi();
-  // Say it up front rather than letting them fight Android permissions first.
+  // Say it up front, loudly, rather than letting them fight Android permissions first.
   if(!SECURE){
     recChk.disabled = true;
     setHint(INSECURE_MSG);
+    $('badurl').classList.remove('hidden');
+    $('badurlWhere').textContent = 'This page is: ' + location.href;
+    $('badurlCopy').addEventListener('click', function(){
+      var u = $('badurlLink').href;
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(u).then(function(){ toast('Link copied — paste it in Chrome'); },
+                                             function(){ toast('Copy failed — type the link above'); });
+      } else { toast('Type the link above into Chrome'); }
+    });
   }
   estimate();
 
