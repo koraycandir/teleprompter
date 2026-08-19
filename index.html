@@ -60,6 +60,14 @@
   .switch input:checked + .slider::before{transform:translateX(20px); background:#fff;}
   .rowhint{font-size:12px; color:var(--dim); line-height:1.45;}
   .rowhint.warnhint{color:var(--tally);}
+  .linkbtn{background:none; border:none; color:var(--dim); font-family:inherit; font-size:12px;
+    text-decoration:underline; padding:6px 0 0; cursor:pointer; text-align:left;}
+  #diag{background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px; margin-top:8px;}
+  #diag pre{margin:0 0 8px; white-space:pre-wrap; word-break:break-word; font-size:11px;
+    line-height:1.5; color:var(--ink); max-height:46vh; overflow:auto;}
+  .diagrow{display:flex; gap:8px;}
+  .diagrow button{flex:1; height:38px; border:1px solid var(--line); background:var(--panel);
+    color:var(--ink); border-radius:8px; font-family:inherit; font-size:13px; cursor:pointer;}
 
   #camPrevWrap{border-radius:10px; overflow:hidden; background:#000; border:1px solid var(--line);}
   #camPrev{display:block; width:100%; max-height:220px; object-fit:cover;}
@@ -190,6 +198,15 @@ The small red line near the top marks your reading spot. Keep your eyes near the
       <video id="camPrev" autoplay playsinline muted></video>
     </div>
     <div class="rowhint" id="camHint">Turn on to film yourself while you read. The take saves to your Downloads when you stop.</div>
+    <button id="diagBtn" class="linkbtn" type="button">Camera not working? Tap for diagnostics</button>
+    <div id="diag" class="hidden">
+      <pre id="diagOut">…</pre>
+      <div class="diagrow">
+        <button id="diagTest" type="button">Test camera</button>
+        <button id="diagCopy" type="button">Copy</button>
+        <button id="diagClose" type="button">Close</button>
+      </div>
+    </div>
   </div>
 
   <div class="controls">
@@ -413,7 +430,14 @@ The small red line near the top marks your reading spot. Keep your eyes near the
   });
 
   // ----- camera -----
+  var lastCamError = null;
+  function noteErr(err){
+    lastCamError = (err && err.name ? err.name : 'Error') +
+                   (err && err.message ? ': ' + err.message : '');
+    return err;
+  }
   function camErrMsg(err){
+    noteErr(err);
     var n = err && err.name;
     // Chrome reports an insecure-origin block as NotAllowedError, which sends people
     // hunting through Android settings for a permission that was never the problem.
@@ -595,6 +619,79 @@ The small red line near the top marks your reading spot. Keep your eyes near the
     startCam(pref).catch(function(err){
       setHint(camErrMsg(err) + '. Still using the previous camera.');
       toast(camErrMsg(err));
+    });
+  });
+
+  // ----- diagnostics -----
+  // The failure is always on a phone I cannot see, so let the app report itself.
+  function buildDiag(){
+    var out = [];
+    function add(k, v){ out.push(k + ': ' + v); }
+    add('url', location.href);
+    add('secure context', window.isSecureContext);
+    add('protocol', location.protocol);
+    add('app allows camera (SECURE)', SECURE);
+    add('CAM_OK', CAM_OK);
+    add('navigator.mediaDevices', !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+    add('MediaRecorder', !!window.MediaRecorder);
+    add('last camera error', lastCamError || 'none yet');
+    add('current stream', stream ? ('active=' + stream.active +
+        ' video=' + stream.getVideoTracks().length + ' audio=' + stream.getAudioTracks().length) : 'none');
+    add('Record switch', recChk.checked ? 'on' : 'off');
+    add('browser', navigator.userAgent);
+
+    var jobs = [];
+    if(navigator.permissions && navigator.permissions.query){
+      ['camera','microphone'].forEach(function(n){
+        jobs.push(navigator.permissions.query({name: n}).then(function(p){
+          add('permission ' + n, p.state);
+        }).catch(function(e){ add('permission ' + n, 'cannot query (' + e.name + ')'); }));
+      });
+    } else {
+      add('permissions API', 'unavailable');
+    }
+    if(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices){
+      jobs.push(navigator.mediaDevices.enumerateDevices().then(function(ds){
+        var cams = ds.filter(function(d){ return d.kind === 'videoinput'; });
+        var mics = ds.filter(function(d){ return d.kind === 'audioinput'; });
+        add('cameras found', cams.length);
+        cams.forEach(function(d, i){ add('  camera ' + (i+1), d.label || '(name hidden until permission granted)'); });
+        add('microphones found', mics.length);
+      }).catch(function(e){ add('device list', 'error ' + e.name); }));
+    }
+    return Promise.all(jobs).then(function(){ return out.join('\n'); });
+  }
+  function showDiag(){
+    $('diag').classList.remove('hidden');
+    $('diagOut').textContent = 'Checking…';
+    buildDiag().then(function(txt){ $('diagOut').textContent = txt; });
+  }
+  $('diagBtn').addEventListener('click', showDiag);
+  $('diagClose').addEventListener('click', function(){ $('diag').classList.add('hidden'); });
+  $('diagCopy').addEventListener('click', function(){
+    var txt = $('diagOut').textContent;
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(function(){ toast('Copied'); },
+                                             function(){ toast('Copy failed — select the text'); });
+    } else { toast('Select the text to copy it'); }
+  });
+  $('diagTest').addEventListener('click', function(){
+    $('diagOut').textContent = 'Asking the browser for the camera…';
+    // Bare request: if THIS fails, it is the browser or the OS, not the app.
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(function(s){
+      var v = s.getVideoTracks()[0];
+      var label = v ? (v.label || '(unnamed)') : 'none';
+      s.getTracks().forEach(function(t){ t.stop(); });
+      buildDiag().then(function(txt){
+        $('diagOut').textContent = 'PLAIN CAMERA TEST: SUCCESS\ngot camera: ' + label +
+          '\n\nThe camera works here — turn the Record switch on now.\n\n' + txt;
+      });
+    }).catch(function(err){
+      noteErr(err);
+      buildDiag().then(function(txt){
+        $('diagOut').textContent = 'PLAIN CAMERA TEST: FAILED\n' + lastCamError +
+          '\n\n' + camErrMsg(err) + '\n\n' + txt;
+      });
     });
   });
 
