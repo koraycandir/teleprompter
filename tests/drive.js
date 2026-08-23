@@ -222,8 +222,13 @@
       ok('save: download triggered', !!dl, dl && dl.name);
       ok('save: filename is take-YYYY-MM-DD-HHMMSS.(webm|mp4)',
          !!dl && /^take-\d{4}-\d{2}-\d{2}-\d{6}\.(webm|mp4)$/.test(dl.name), dl && dl.name);
-      ok('save: extension matches recorded mime',
-         !!dl && !!bl && ((bl.type.indexOf('mp4') >= 0) === /\.mp4$/.test(dl.name)), (bl && bl.type) + ' / ' + (dl && dl.name));
+      // An mp4 container holding VP9 must NOT be named .mp4 — players refuse it.
+      var mp4c = !!bl && bl.type.indexOf('mp4') >= 0;
+      var vpIn = !!bl && /vp0?[89]/i.test(bl.type);
+      var expectExt = (mp4c && !vpIn) ? 'mp4' : 'webm';
+      ok('save: extension matches the codecs actually inside',
+         !!dl && dl.name.slice(-(expectExt.length + 1)) === '.' + expectExt,
+         (bl && bl.type) + ' -> expected .' + expectExt + ', got ' + (dl && dl.name));
     }
     ok('stop: recorder inactive', mr && mr.inst.state === 'inactive', mr && mr.inst.state);
     ok('stop: chunks were flushed', mr && mr.chunkCount > 0, mr && (mr.chunkCount + ' chunks, ' + mr.chunkBytes + ' bytes'));
