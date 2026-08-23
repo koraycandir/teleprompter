@@ -23,8 +23,10 @@
   if (RealMR) {
     var Spy = function (stream, opts) {
       var inst = new RealMR(stream, opts);
+      var vt0 = stream ? stream.getVideoTracks()[0] : null;
       var rec = {
         opts: opts ? JSON.parse(JSON.stringify(opts)) : null,
+        trackSettings: (vt0 && vt0.getSettings) ? vt0.getSettings() : null,
         timeslice: null, events: [], chunkCount: 0, chunkBytes: 0,
         videoTracks: stream ? stream.getVideoTracks().length : 0,
         audioTracks: stream ? stream.getAudioTracks().length : 0,

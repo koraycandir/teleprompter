@@ -109,7 +109,10 @@
     var mr = lastMR();
     ok('record: MediaRecorder constructed', !!mr);
     if (mr) {
-      ok('record: 8 Mbps requested', mr.opts && mr.opts.videoBitsPerSecond === 8000000, JSON.stringify(mr.opts));
+      ok('record: bitrate scales with resolution (~8 Mbps at 1080p)',
+         mr.opts && mr.opts.videoBitsPerSecond > 6000000 && mr.opts.videoBitsPerSecond < 12000000,
+         Math.round(mr.opts.videoBitsPerSecond / 1000000) + ' Mbps at ' +
+         (mr.trackSettings ? mr.trackSettings.width + 'x' + mr.trackSettings.height : '?'));
       ok('record: timeslice 1000ms (survives a crash)', mr.timeslice === 1000, String(mr.timeslice));
       ok('record: state is recording', mr.inst.state === 'recording', mr.inst.state);
       ok('record: recording 1 video + 1 audio track', mr.videoTracks === 1 && mr.audioTracks === 1);
@@ -264,6 +267,66 @@
        saved3 ? S.blobs[S.blobs.length - 1].size + ' bytes' : 'FOOTAGE LOST');
     ok('exit: returned to setup', vis($('setup')) && !vis($('stage')));
 
+    // ---------- portrait shape ----------
+    $('shapeSel').value = 'portrait';
+    $('shapeSel').dispatchEvent(new Event('change', { bubbles: true }));
+    await sleep(400);
+    await waitFor(function () { return $('camPrev').srcObject && $('camPrev').srcObject.active; }, 9000);
+    await sleep(800);
+    var pset = $('camPrev').srcObject.getVideoTracks()[0].getSettings();
+    ok('shape: camera re-opened after choosing portrait', !!pset.width, pset.width + 'x' + pset.height);
+    ok('shape: info line tells you what will be recorded', !$('camInfo').classList.contains('hidden'),
+       $('camInfo').textContent.slice(0, 110));
+
+    var blobsP = S.blobs.length;
+    $('startBtn').click();
+    await waitFor(function () { return vis($('stage')); }, 5000);
+    $('stage').click();
+    await waitFor(function () { return vis($('recBadge')); }, 5000);
+    await sleep(2200);
+    var mrP = lastMR();
+    var pts = mrP && mrP.trackSettings;
+    ok('shape: the RECORDED stream is portrait (taller than wide)',
+       !!(pts && pts.height > pts.width), pts ? pts.width + 'x' + pts.height : 'no settings');
+    ok('shape: portrait bitrate scaled to pixel count', mrP && mrP.opts && mrP.opts.videoBitsPerSecond >= 2500000,
+       mrP && mrP.opts && Math.round(mrP.opts.videoBitsPerSecond / 1000000) + ' Mbps');
+    $('stopBtn').click();
+    var savedP = await waitFor(function () { return S.blobs.length > blobsP; }, 15000);
+    ok('shape: portrait take saved', savedP, savedP ? S.blobs[S.blobs.length - 1].size + ' bytes' : '');
+    await sleep(400);
+
+    // ---------- max resolution ----------
+    $('shapeSel').value = 'native';
+    $('shapeSel').dispatchEvent(new Event('change', { bubbles: true }));
+    await sleep(300);
+    $('qualitySel').value = 'auto';
+    $('qualitySel').dispatchEvent(new Event('change', { bubbles: true }));
+    await sleep(400);
+    await waitFor(function () { return $('camPrev').srcObject && $('camPrev').srcObject.active; }, 9000);
+    await sleep(800);
+    var aset = $('camPrev').srcObject.getVideoTracks()[0].getSettings();
+    ok('quality: Auto asks for more than 1080p', aset.height > 1080, aset.width + 'x' + aset.height);
+
+    var blobsQ = S.blobs.length;
+    $('startBtn').click();
+    await waitFor(function () { return vis($('stage')); }, 5000);
+    $('stage').click();
+    await waitFor(function () { return vis($('recBadge')); }, 5000);
+    await sleep(2200);
+    var mrQ = lastMR();
+    ok('quality: high-res take uses a much higher bitrate',
+       mrQ && mrQ.opts && mrQ.opts.videoBitsPerSecond > 8000000,
+       mrQ && mrQ.opts && Math.round(mrQ.opts.videoBitsPerSecond / 1000000) + ' Mbps');
+    $('stopBtn').click();
+    var savedQ = await waitFor(function () { return S.blobs.length > blobsQ; }, 15000);
+    ok('quality: high-res take saved', savedQ, savedQ ? S.blobs[S.blobs.length - 1].size + ' bytes' : '');
+    await sleep(400);
+    $('qualitySel').value = '1080';
+    $('qualitySel').dispatchEvent(new Event('change', { bubbles: true }));
+    await sleep(400);
+    await waitFor(function () { return $('camPrev').srcObject && $('camPrev').srcObject.active; }, 9000);
+    await sleep(600);
+
     // ---------- DESTRUCTIVE: camera dies mid-take ----------
     var blobs4 = S.blobs.length;
     $('startBtn').click();
@@ -316,7 +379,9 @@
           gum: S.gum, gumErrors: S.gumErrors, mimeQueries: S.mimeQueries,
           blobs: S.blobs, downloads: S.downloads,
           recorders: S.mr.map(function (m) {
+            var ts = m.trackSettings || {};
             return { opts: m.opts, mime: m.inst.mimeType, timeslice: m.timeslice,
+                     size: (ts.width || '?') + 'x' + (ts.height || '?'),
                      events: m.events, chunks: m.chunkCount, bytes: m.chunkBytes, state: m.inst.state };
           }),
           wakeLock: S.wakeLock, fullscreen: S.fullscreen, enumerate: S.enumerate

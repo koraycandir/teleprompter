@@ -133,8 +133,10 @@ for r in res:
 
 print(f"\n{'-'*74}\nRECORDERS")
 for i, m in enumerate(data["spy"]["recorders"]):
-    print(f"  #{i+1} mime={m['mime']}  timeslice={m['timeslice']}  chunks={m['chunks']} "
-          f"bytes={m['bytes']}  state={m['state']}  events={m['events']}")
+    br = (m.get("opts") or {}).get("videoBitsPerSecond")
+    mbps = f"{round(br/1_000_000)} Mbps" if br else "?"
+    print(f"  #{i+1} {m.get('size','?'):>10}  {mbps:>8}  {m['mime']}  "
+          f"chunks={m['chunks']} bytes={m['bytes']:,}")
 print("\nMIME NEGOTIATION (in the order the app tried them)")
 seen = set()
 for q in data["spy"]["mimeQueries"]:

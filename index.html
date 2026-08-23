@@ -86,8 +86,11 @@
     color:var(--ink); border-radius:8px; font-family:inherit; font-size:13px; cursor:pointer;}
 
   #camPrevWrap{border-radius:10px; overflow:hidden; background:#000; border:1px solid var(--line);}
-  #camPrev{display:block; width:100%; max-height:220px; object-fit:cover;}
+  #camPrev{display:block; width:100%; max-height:220px; object-fit:cover; background:#000;}
   #camPrev.mirror{transform:scaleX(-1);}
+  /* When a shape is forced, the preview matches it so framing is honest. */
+  #camPrevWrap.shaped{display:flex; justify-content:center;}
+  #camPrevWrap.shaped #camPrev{width:auto; height:240px; max-height:240px;}
 
   #startBtn{border:none; border-radius:12px; padding:16px; cursor:pointer;
     background:var(--tally); color:#fff; font-family:inherit; font-weight:800;
@@ -127,6 +130,7 @@
     background:#000; z-index:7; touch-action:none; cursor:grab;
     transition:width .25s, opacity .25s;}
   #pip.mirror{transform:scaleX(-1);}
+  #pip{object-fit:cover;}
   #pip.rec{width:min(18vw,110px); opacity:.5;}
 
   #recBadge{position:absolute; left:12px; bottom:calc(28px + env(safe-area-inset-bottom));
@@ -221,9 +225,29 @@ The small red line near the top marks your reading spot. Keep your eyes near the
       <select id="camSel"></select>
       <button id="flipCamBtn" class="minibtn" aria-label="Switch front/rear">&#8646;</button>
     </div>
+    <div class="row hidden" id="qualityRow">
+      <label for="qualitySel">Quality</label>
+      <select id="qualitySel">
+        <option value="auto">Highest the camera allows</option>
+        <option value="2160">4K &mdash; 2160p</option>
+        <option value="1440">1440p</option>
+        <option value="1080" selected>1080p</option>
+        <option value="720">720p &mdash; smallest files</option>
+      </select>
+    </div>
+    <div class="row hidden" id="shapeRow">
+      <label for="shapeSel">Shape</label>
+      <select id="shapeSel">
+        <option value="portrait">Portrait 9:16 &mdash; Reels/TikTok</option>
+        <option value="landscape">Landscape 16:9 &mdash; YouTube</option>
+        <option value="square">Square 1:1</option>
+        <option value="native" selected>Whatever the camera gives</option>
+      </select>
+    </div>
     <div id="camPrevWrap" class="hidden">
       <video id="camPrev" autoplay playsinline muted></video>
     </div>
+    <div class="rowhint hidden" id="camInfo"></div>
     <div class="rowhint" id="camHint">Turn on to film yourself while you read. The take saves to your Downloads when you stop.</div>
     <button id="diagBtn" class="linkbtn" type="button">Camera not working? Tap for diagnostics</button>
     <div id="diag" class="hidden">
@@ -304,6 +328,8 @@ The small red line near the top marks your reading spot. Keep your eyes near the
   var statWords = $('statWords'), statTime = $('statTime');
   var recChk = $('recChk'), camRow = $('camRow'), camSel = $('camSel');
   var camPrevWrap = $('camPrevWrap'), camPrev = $('camPrev'), camHint = $('camHint');
+  var qualitySel = $('qualitySel'), shapeSel = $('shapeSel');
+  var qualityRow = $('qualityRow'), shapeRow = $('shapeRow'), camInfo = $('camInfo');
   var pip = $('pip'), recBadge = $('recBadge'), recTime = $('recTime');
   var startBtn = $('startBtn'), stopBtn = $('stopBtn');
 
@@ -499,11 +525,78 @@ The small red line near the top marks your reading spot. Keep your eyes near the
     camHint.textContent = msg || DEFAULT_HINT;
     camHint.classList.toggle('warnhint', !!msg);
   }
+  // ----- resolution + shape -----
+  function desiredAspect(){
+    switch(shapeSel.value){
+      case 'portrait':  return 9/16;
+      case 'landscape': return 16/9;
+      case 'square':    return 1;
+      default:          return null;   // take whatever the camera hands us
+    }
+  }
+  function wantVideo(){
+    // Quality is the SHORT edge, the way people say "1080p" for both orientations.
+    var q = qualitySel.value;
+    var shortEdge = (q === 'auto') ? 2160 : parseInt(q, 10);
+    var a = desiredAspect();
+    var w, h;
+    if(a === null){ w = Math.round(shortEdge * 16/9); h = shortEdge; }
+    else if(a < 1){ w = shortEdge; h = Math.round(shortEdge / a); }   // portrait
+    else { w = Math.round(shortEdge * a); h = shortEdge; }
+    // 'ideal' not 'exact': a camera that cannot do this still opens, just smaller.
+    return { width:{ideal:w}, height:{ideal:h}, frameRate:{ideal:30} };
+  }
+  function even(n){ n = Math.round(n); return n - (n % 2); }   // encoders want even dimensions
+  // What we will actually record, and whether the canvas stage is needed.
+  function recordingPlan(){
+    var t = currentTrack();
+    var s = (t && t.getSettings) ? t.getSettings() : {};
+    var vw = s.width || 0, vh = s.height || 0;
+    var a = desiredAspect();
+    if(!vw || !vh) return { w:0, h:0, crop:false, camW:vw, camH:vh };
+    if(a === null) return { w:vw, h:vh, crop:false, camW:vw, camH:vh };
+    var actual = vw / vh;
+    if(Math.abs(actual - a) < 0.02) return { w:vw, h:vh, crop:false, camW:vw, camH:vh };
+    // The camera refused this shape, so crop its frame to fit — 1:1 pixels, no upscaling.
+    var ow, oh;
+    if(a < actual){ oh = vh; ow = vh * a; } else { ow = vw; oh = vw / a; }
+    return { w:even(ow), h:even(oh), crop:true, camW:vw, camH:vh };
+  }
+  function bitrateFor(w, h){
+    if(!w || !h) return 8000000;
+    return Math.max(2500000, Math.min(40000000, Math.round(w * h * 30 * 0.13)));
+  }
+  function applyPreviewShape(){
+    var a = desiredAspect();
+    camPrevWrap.classList.toggle('shaped', !!a);
+    camPrev.style.aspectRatio = a ? String(a) : '';
+    pip.style.aspectRatio = a ? String(a) : '';
+  }
+  function updateCamInfo(){
+    if(!stream){ camInfo.classList.add('hidden'); return; }
+    var p = recordingPlan();
+    var txt = 'Camera is giving ' + p.camW + '×' + p.camH;
+    if(p.crop){
+      txt += ' — it will not shoot this shape, so the take is cropped to ' + p.w + '×' + p.h +
+             '. Choosing “whatever the camera gives” keeps more pixels.';
+    } else if(p.w){
+      txt += ' — recording ' + p.w + '×' + p.h + ' at about ' +
+             Math.round(bitrateFor(p.w, p.h) / 1000000) + ' Mbps.';
+    }
+    camInfo.textContent = txt;
+    camInfo.classList.toggle('warnhint', p.crop);
+    camInfo.classList.remove('hidden');
+  }
+
   function camUi(){
     var on = !!stream;
     camRow.classList.toggle('hidden', !on);
+    qualityRow.classList.toggle('hidden', !on);
+    shapeRow.classList.toggle('hidden', !on);
     camPrevWrap.classList.toggle('hidden', !on);
     startBtn.textContent = (recChk.checked && on) ? 'Roll + record' : 'Roll prompter';
+    applyPreviewShape();
+    updateCamInfo();
   }
   function refreshDevices(){
     if(!CAM_OK || !navigator.mediaDevices.enumerateDevices) return Promise.resolve();
@@ -553,7 +646,7 @@ The small red line near the top marks your reading spot. Keep your eyes near the
     var prev = stream;          // keep the working stream until a new one is actually live
     var fellBack = false;
     function want(withDevice){
-      var video = { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30} };
+      var video = wantVideo();
       if(withDevice && pref && pref.deviceId) video.deviceId = {exact: pref.deviceId};
       else if(pref && pref.facing) video.facingMode = {ideal: pref.facing};
       return { video: video, audio: { echoCancellation:true, noiseSuppression:true } };
@@ -631,6 +724,21 @@ The small red line near the top marks your reading spot. Keep your eyes near the
       refreshDevices();
     });
   });
+  function requalify(){
+    store('tp.quality', qualitySel.value);
+    store('tp.shape', shapeSel.value);
+    applyPreviewShape();
+    if(!stream){ updateCamInfo(); return; }
+    // Re-open the camera so it can offer the new size/shape natively if it is able to.
+    var t = currentTrack();
+    var id = (t && t.getSettings) ? t.getSettings().deviceId : null;
+    startCam(id ? {deviceId: id} : {facing: currentFacing() || 'user'}).catch(function(err){
+      setHint(camErrMsg(err) + '. Still using the previous settings.');
+      toast(camErrMsg(err));
+    });
+  }
+  qualitySel.addEventListener('change', requalify);
+  shapeSel.addEventListener('change', requalify);
   $('flipCamBtn').addEventListener('click', function(){
     setHint(null);
     var facing = currentFacing();
@@ -746,16 +854,70 @@ The small red line near the top marks your reading spot. Keep your eyes near the
     return 'take-' + d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()) +
            '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
   }
+  // ----- canvas crop stage (only when the camera will not shoot the chosen shape) -----
+  var cropCanvas = null, cropRaf = null, cropSrcVideo = null, cropStream = null;
+  function startCropPipe(ow, oh){
+    if(!cropSrcVideo){
+      cropSrcVideo = document.createElement('video');
+      cropSrcVideo.muted = true;
+      cropSrcVideo.autoplay = true;
+      cropSrcVideo.setAttribute('playsinline', '');
+      // Must stay rendered — a display:none video may stop producing frames.
+      cropSrcVideo.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none;';
+      document.body.appendChild(cropSrcVideo);
+    }
+    if(cropSrcVideo.srcObject !== stream) cropSrcVideo.srcObject = stream;
+    var pl = cropSrcVideo.play();
+    if(pl && pl.catch) pl.catch(function(){});
+
+    cropCanvas = document.createElement('canvas');
+    cropCanvas.width = ow;
+    cropCanvas.height = oh;
+    var ctx = cropCanvas.getContext('2d', { alpha:false });
+    function draw(){
+      cropRaf = requestAnimationFrame(draw);
+      var v = cropSrcVideo;
+      if(!v || v.readyState < 2) return;
+      var vw = v.videoWidth, vh = v.videoHeight;
+      if(!vw || !vh) return;
+      var sw = Math.min(vw, ow), sh = Math.min(vh, oh);
+      ctx.drawImage(v, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, ow, oh);
+    }
+    draw();
+    var cs = cropCanvas.captureStream(30);
+    var mixed = new MediaStream();
+    cs.getVideoTracks().forEach(function(t){ mixed.addTrack(t); });
+    stream.getAudioTracks().forEach(function(t){ mixed.addTrack(t); });   // real mic, untouched
+    cropStream = mixed;
+    return mixed;
+  }
+  function stopCropPipe(){
+    if(cropRaf){ cancelAnimationFrame(cropRaf); cropRaf = null; }
+    if(cropStream){
+      // Stop only the canvas track; the camera's own tracks must stay live.
+      cropStream.getVideoTracks().forEach(function(t){ t.stop(); });
+      cropStream = null;
+    }
+    cropCanvas = null;
+    if(cropSrcVideo) cropSrcVideo.srcObject = null;
+  }
+
   function startRecording(){
     if(!stream || !stream.active || !window.MediaRecorder) return false;
     recMime = pickMime();
     chunks = [];
-    var opts = { videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 };
+    var plan = recordingPlan();
+    var src = stream;
+    if(plan.crop && plan.w && plan.h){
+      try{ src = startCropPipe(plan.w, plan.h); }
+      catch(e){ stopCropPipe(); src = stream; toast('Could not crop — recording full frame'); }
+    }
+    var opts = { videoBitsPerSecond: bitrateFor(plan.w, plan.h), audioBitsPerSecond: 128000 };
     if(recMime) opts.mimeType = recMime;
-    try{ recorder = new MediaRecorder(stream, opts); }
+    try{ recorder = new MediaRecorder(src, opts); }
     catch(e){
-      try{ recorder = new MediaRecorder(stream); }
-      catch(e2){ toast('Recording not supported here'); return false; }
+      try{ recorder = new MediaRecorder(src); }
+      catch(e2){ stopCropPipe(); toast('Recording not supported here'); return false; }
     }
     recorder.ondataavailable = function(e){ if(e.data && e.data.size) chunks.push(e.data); };
     // A recorder can stop on its own (camera seized, hardware error). Tear the UI
@@ -783,6 +945,7 @@ The small red line near the top marks your reading spot. Keep your eyes near the
     return recorder && recorder.state !== 'inactive';
   }
   function resetRecUi(){
+    stopCropPipe();
     clearInterval(recTimer);
     recTimer = null;
     recBadge.classList.add('hidden');
@@ -1105,6 +1268,11 @@ The small red line near the top marks your reading spot. Keep your eyes near the
   speedRange.value = speed;
   speedOut.textContent = speed;
   $('mirrorChk').checked = recall('tp.mirror') === '1';
+  var savedQ = recall('tp.quality');
+  if(savedQ && qualitySel.querySelector('option[value="' + savedQ + '"]')) qualitySel.value = savedQ;
+  var savedShape = recall('tp.shape');
+  if(savedShape && shapeSel.querySelector('option[value="' + savedShape + '"]')) shapeSel.value = savedShape;
+  applyPreviewShape();
   if(CAM_OK && recall('tp.rec') === '1'){
     recChk.checked = true;
     var savedCam = recall('tp.camId');
