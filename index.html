@@ -509,7 +509,9 @@ The small red line near the top marks your reading spot. Keep your eyes near the
     // Chrome reports an insecure-origin block as NotAllowedError, which sends people
     // hunting through Android settings for a permission that was never the problem.
     if(!SECURE) return 'Camera blocked: this page is not on https://';
-    if(n === 'NotAllowedError') return 'Camera permission denied — allow it in site settings';
+    if(n === 'NotAllowedError') return IOSISH
+      ? 'Camera or microphone permission denied — check both in Safari Website Settings'
+      : 'Camera or microphone permission denied — allow both in site settings';
     if(n === 'NotFoundError' || n === 'OverconstrainedError') return 'No usable camera found';
     if(n === 'NotReadableError') return 'Camera is busy in another app';
     return 'Camera error' + (n ? ': ' + n : '');
@@ -597,8 +599,11 @@ The small red line near the top marks your reading spot. Keep your eyes near the
       txt += ' — recording ' + p.w + '×' + p.h + ' at about ' +
              Math.round(bitrateFor(p.w, p.h) / 1000000) + ' Mbps.';
     }
+    // Do not mistake a video-only fallback for a fully functioning recorder.
+    var silent = stream.getAudioTracks().length === 0;
+    if(silent) txt += ' — MICROPHONE UNAVAILABLE: recordings will be SILENT. Allow the microphone in Safari Website Settings, then retry.';
     camInfo.textContent = txt;
-    camInfo.classList.toggle('warnhint', p.crop);
+    camInfo.classList.toggle('warnhint', p.crop || silent);
     camInfo.classList.remove('hidden');
   }
 
@@ -659,6 +664,7 @@ The small red line near the top marks your reading spot. Keep your eyes near the
     var myGen = ++camGen;
     var prev = stream;          // keep the working stream until a new one is actually live
     var fellBack = false;
+    var videoOnly = false;      // a microphone failure should not prevent camera preview
     function want(withDevice){
       var video = wantVideo();
       if(withDevice && pref && pref.deviceId) video.deviceId = {exact: pref.deviceId};
@@ -688,6 +694,17 @@ The small red line near the top marks your reading spot. Keep your eyes near the
         }
         throw err;
       })
+      .catch(function(err){
+        // Safari may reject a combined request when only the microphone is blocked.
+        // Retry camera-only access rather than abandoning the video preview.
+        if(['NotAllowedError', 'NotFoundError', 'NotReadableError'].indexOf(err.name) < 0) throw err;
+        var request = want(!fellBack);
+        request.audio = false;
+        return navigator.mediaDevices.getUserMedia(request).then(function(s){
+          videoOnly = true;
+          return s;
+        }).catch(function(){ throw err; }); // preserve the original combined-request error
+      })
       .then(function(s){
         if(myGen !== camGen){                 // superseded or cancelled while we waited
           s.getTracks().forEach(function(t){ t.stop(); });
@@ -695,6 +712,10 @@ The small red line near the top marks your reading spot. Keep your eyes near the
         }
         releasePrev();
         adoptStream(s, !fellBack);
+        lastCamError = null;
+        setHint(videoOnly
+          ? 'Camera is on, but microphone access failed. Recordings will be SILENT until microphone access is restored.'
+          : null);
         // Populate the picker before revealing it, or the row flashes empty.
         // (Labels only become available after the first permission grant.)
         return refreshDevices();
@@ -706,6 +727,7 @@ The small red line near the top marks your reading spot. Keep your eyes near the
     return p;
   }
   function camFailed(err){
+    noteErr(err);
     recChk.checked = false;
     store('tp.rec','0');
     camUi();
@@ -825,6 +847,10 @@ The small red line near the top marks your reading spot. Keep your eyes near the
     } else { toast('Select the text to copy it'); }
   });
   $('diagTest').addEventListener('click', function(){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      $('diagOut').textContent = 'Camera API unavailable in this browser or context.';
+      return;
+    }
     $('diagOut').textContent = 'Asking the browser for the camera…';
     // Bare request: if THIS fails, it is the browser or the OS, not the app.
     navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(function(s){
@@ -837,9 +863,22 @@ The small red line near the top marks your reading spot. Keep your eyes near the
       });
     }).catch(function(err){
       noteErr(err);
-      buildDiag().then(function(txt){
-        $('diagOut').textContent = 'PLAIN CAMERA TEST: FAILED\n' + lastCamError +
-          '\n\n' + camErrMsg(err) + '\n\n' + txt;
+      // Probe camera and microphone separately to show which permission failed.
+      // Keep requests sequential so the OS never sees concurrent camera captures.
+      function probe(constraints){
+        return navigator.mediaDevices.getUserMedia(constraints).then(function(s){
+          s.getTracks().forEach(function(t){ t.stop(); });
+          return 'SUCCESS';
+        }).catch(function(e){ return 'FAILED: ' + e.name + (e.message ? ': ' + e.message : ''); });
+      }
+      probe({video:true, audio:false}).then(function(videoResult){
+        return probe({video:false, audio:true}).then(function(audioResult){
+          return buildDiag().then(function(txt){
+            $('diagOut').textContent = 'COMBINED CAMERA + MIC TEST: FAILED\n' + lastCamError +
+              '\nVIDEO ONLY: ' + videoResult + '\nMICROPHONE ONLY: ' + audioResult +
+              '\n\n' + camErrMsg(err) + '\n\n' + txt;
+          });
+        });
       });
     });
   });
